@@ -19,7 +19,9 @@
 //! - Agricultural domain mapping: weather observations → reservoir features
 //! - Board populations map to AKD1000 int4 for edge deployment
 
-use bingocube_nautilus::{BetaObservation, NautilusBrain, NautilusBrainConfig, ShellConfig};
+use bingocube_nautilus::{
+    BetaObservation, BingoCubeError, NautilusBrain, NautilusBrainConfig, ShellConfig,
+};
 
 /// Number of prediction targets for the agricultural brain.
 ///
@@ -147,17 +149,20 @@ pub struct AirSpringBrain {
 
 impl AirSpringBrain {
     /// Create a new agricultural brain for a named instance (e.g. "eastgate").
-    #[must_use]
-    pub fn new(config: AirSpringBrainConfig, instance: &str) -> Self {
-        let brain = NautilusBrain::new(config.brain.clone(), instance);
+    ///
+    /// # Errors
+    ///
+    /// Returns `BingoCubeError` if the underlying nautilus brain fails to initialize.
+    pub fn new(config: AirSpringBrainConfig, instance: &str) -> Result<Self, BingoCubeError> {
+        let brain = NautilusBrain::new(config.brain.clone(), instance)?;
 
-        Self {
+        Ok(Self {
             config,
             brain,
             observations: Vec::new(),
             concept_edge_doys: Vec::new(),
             trained: false,
-        }
+        })
     }
 
     /// Record a weather/soil observation.
@@ -202,19 +207,23 @@ impl AirSpringBrain {
 
     /// Train the brain on all accumulated observations.
     /// Returns MSE, or `None` if insufficient data.
-    pub fn train(&mut self) -> Option<f64> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `BingoCubeError` if the underlying nautilus training fails.
+    pub fn train(&mut self) -> Result<Option<f64>, BingoCubeError> {
         if self.observations.len() < self.config.brain.min_training_points {
-            return None;
+            return Ok(None);
         }
 
-        let mse = self.brain.train();
+        let mse = self.brain.train()?;
 
         if mse.is_some() {
-            self.detect_concept_edges();
+            self.detect_concept_edges()?;
             self.trained = true;
         }
 
-        mse
+        Ok(mse)
     }
 
     /// Predict ET₀, soil deficit, and crop stress for a weather observation.
@@ -264,8 +273,8 @@ impl AirSpringBrain {
         })
     }
 
-    fn detect_concept_edges(&mut self) {
-        let edges = self.brain.detect_concept_edges();
+    fn detect_concept_edges(&mut self) -> Result<(), BingoCubeError> {
+        let edges = self.brain.detect_concept_edges()?;
         self.concept_edge_doys.clear();
 
         for (beta, _error) in &edges {
@@ -282,6 +291,7 @@ impl AirSpringBrain {
 
         self.concept_edge_doys.sort_unstable();
         self.concept_edge_doys.dedup();
+        Ok(())
     }
 }
 
